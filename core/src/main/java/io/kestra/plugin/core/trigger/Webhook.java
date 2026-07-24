@@ -1,5 +1,7 @@
 package io.kestra.plugin.core.trigger;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -9,6 +11,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.kestra.core.http.HttpResponse;
+import io.kestra.core.http.HttpRequest;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
@@ -165,7 +168,22 @@ public class Webhook extends AbstractWebhookTrigger implements TriggerOutput<Web
             return Mono.just(HttpResponse.of(HttpResponse.Status.NOT_FOUND));
         }
 
-        String body = context.request().getBody() != null ? (String) context.request().getBody().getContent() : null;
+        HttpRequest.RequestBody requestBody = context.request().getBody();
+        String body = requestBody instanceof HttpRequest.StringRequestBody stringRequestBody ? stringRequestBody.getContent() : null;
+        List<Part> parts = requestBody instanceof HttpRequest.WebhookMultipartRequestBody multipartRequestBody
+            ? multipartRequestBody.getParts().stream().filter(part -> part.filename() != null).map(Part::from).toList()
+            : null;
+        Map<String, List<String>> formFields = requestBody instanceof HttpRequest.WebhookMultipartRequestBody multipartRequestBody
+            ? multipartRequestBody.getParts().stream()
+                .filter(part -> part.filename() == null)
+                .collect(java.util.stream.Collectors.groupingBy(
+                    HttpRequest.WebhookMultipartPart::name,
+                    java.util.stream.Collectors.mapping(part -> new String(part.content(), StandardCharsets.UTF_8), java.util.stream.Collectors.toList())
+                ))
+            : null;
+        String bodyBase64 = requestBody instanceof HttpRequest.ByteArrayRequestBody byteArrayRequestBody
+            ? Base64.getEncoder().encodeToString(byteArrayRequestBody.getContent())
+            : null;
 
         Optional<Execution> maybeExecution;
         try {
@@ -175,10 +193,13 @@ public class Webhook extends AbstractWebhookTrigger implements TriggerOutput<Web
                 this,
                 Webhook.Output.builder()
                     .body(
-                        tryMap(body)
+                        body == null ? null : tryMap(body)
                             .or(() -> tryArray(body))
                             .orElse(body)
                     )
+                    .parts(parts)
+                    .formFields(formFields)
+                    .bodyBase64(bodyBase64)
                     .headers(context.request().getHeaders() != null ? context.request().getHeaders().map() : null)
                     .parameters(context.webhookService().parseParameters(context))
                     .build()
@@ -271,11 +292,20 @@ public class Webhook extends AbstractWebhookTrigger implements TriggerOutput<Web
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(
             title = "The full body for the webhook request",
-            description = "We try to deserialize the incoming request as JSON (array or object).\n" +
-                "If we can't deserialize, the full body will be available as a string."
+            description = "We try to deserialize text and JSON requests as a JSON array or object.\n" +
+                "If we can't deserialize, the text body is available as a string. Binary bodies are available in `bodyBase64`."
         )
         @NotNull
         private Object body;
+
+        @Schema(title = "The file parts for a multipart webhook request")
+        private List<Part> parts;
+
+        @Schema(title = "The non-file form fields for a multipart webhook request")
+        private Map<String, List<String>> formFields;
+
+        @Schema(title = "The base64-encoded body for a binary webhook request")
+        private String bodyBase64;
 
         @Schema(title = "The headers for the webhook request")
         @NotNull
@@ -284,5 +314,28 @@ public class Webhook extends AbstractWebhookTrigger implements TriggerOutput<Web
         @Schema(title = "The parameters for the webhook request")
         @NotNull
         private Map<String, List<String>> parameters;
+    }
+
+    /**
+     * A file received in a multipart webhook request.
+     *
+     * @param name the form field name
+     * @param filename the uploaded filename
+     * @param contentType the file content type
+     * @param size the file size in bytes
+     * @param content the base64-encoded file content
+     */
+    @Builder
+    @Schema(title = "A multipart file part")
+    public record Part(String name, String filename, String contentType, long size, String content) {
+        private static Part from(HttpRequest.WebhookMultipartPart part) {
+            return new Part(
+                part.name(),
+                part.filename(),
+                part.contentType(),
+                part.content().length,
+                Base64.getEncoder().encodeToString(part.content())
+            );
+        }
     }
 }

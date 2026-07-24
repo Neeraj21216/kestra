@@ -283,6 +283,50 @@ public class HttpRequest {
         }
     }
 
+    /**
+     * A multipart request body received by a webhook.
+     *
+     * <p>This is intentionally separate from {@link MultipartRequestBody}, which models an outgoing
+     * multipart request.</p>
+     */
+    @Getter
+    @AllArgsConstructor
+    @SuperBuilder
+    public static class WebhookMultipartRequestBody extends RequestBody {
+        private List<WebhookMultipartPart> parts;
+
+        @Override
+        public Object getContent() {
+            return this.parts;
+        }
+
+        @Override
+        public Charset getCharset() {
+            return StandardCharsets.UTF_8;
+        }
+
+        @Override
+        public String getContentType() {
+            return ContentType.MULTIPART_FORM_DATA.getMimeType();
+        }
+
+        @Override
+        public HttpEntity to() {
+            throw new UnsupportedOperationException("Webhook multipart request bodies cannot be sent.");
+        }
+    }
+
+    /**
+     * A decoded part of a multipart webhook request.
+     *
+     * @param name the form field name
+     * @param filename the uploaded filename, or {@code null} for a form field
+     * @param contentType the part content type, or {@code null} when it is not provided
+     * @param content the unmodified part bytes
+     */
+    public record WebhookMultipartPart(String name, String filename, String contentType, byte[] content) {
+    }
+
     @Getter
     @AllArgsConstructor
     @SuperBuilder

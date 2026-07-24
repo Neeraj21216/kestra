@@ -564,8 +564,21 @@ public class ExecutionController {
         @Parameter(description = "The flow id") @PathVariable String id,
         @Parameter(description = "The webhook trigger uid") @PathVariable String key,
         @Parameter(description = "Optional additional path segments") @Nullable @PathVariable String path,
-        HttpRequest<String> request) throws IllegalVariableEvaluationException {
+        HttpRequest<byte[]> request) throws IllegalVariableEvaluationException {
         return this.webhook(namespace, id, key, path, request);
+    }
+
+    @ExecuteOn(TaskExecutors.IO)
+    @Post(uri = "/webhook/{namespace}/{id}/{key}{/path}", consumes = MediaType.MULTIPART_FORM_DATA)
+    @SingleResult
+    public Mono<HttpResponse<?>> triggerExecutionByPostMultipartWebhook(
+        @PathVariable String namespace,
+        @PathVariable String id,
+        @PathVariable String key,
+        @Nullable @PathVariable String path,
+        @Body MultipartBody multipartBody,
+        HttpRequest<?> request) throws IllegalVariableEvaluationException {
+        return this.webhook(namespace, id, key, path, MicronautHttpService.from(request, multipartBody));
     }
 
     @ExecuteOn(TaskExecutors.IO)
@@ -578,7 +591,7 @@ public class ExecutionController {
         @Parameter(description = "The flow id") @PathVariable String id,
         @Parameter(description = "The webhook trigger uid") @PathVariable String key,
         @Parameter(description = "Optional additional path segments") @Nullable @PathVariable String path,
-        HttpRequest<String> request) throws IllegalVariableEvaluationException {
+        HttpRequest<?> request) throws IllegalVariableEvaluationException {
         return this.webhook(namespace, id, key, path, request);
     }
 
@@ -592,8 +605,21 @@ public class ExecutionController {
         @Parameter(description = "The flow id") @PathVariable String id,
         @Parameter(description = "The webhook trigger uid") @PathVariable String key,
         @Parameter(description = "Optional additional path segments") @Nullable @PathVariable String path,
-        HttpRequest<String> request) throws IllegalVariableEvaluationException {
+        HttpRequest<byte[]> request) throws IllegalVariableEvaluationException {
         return this.webhook(namespace, id, key, path, request);
+    }
+
+    @ExecuteOn(TaskExecutors.IO)
+    @Put(uri = "/webhook/{namespace}/{id}/{key}{/path}", consumes = MediaType.MULTIPART_FORM_DATA)
+    @SingleResult
+    public Mono<HttpResponse<?>> triggerExecutionByPutMultipartWebhook(
+        @PathVariable String namespace,
+        @PathVariable String id,
+        @PathVariable String key,
+        @Nullable @PathVariable String path,
+        @Body MultipartBody multipartBody,
+        HttpRequest<?> request) throws IllegalVariableEvaluationException {
+        return this.webhook(namespace, id, key, path, MicronautHttpService.from(request, multipartBody));
     }
 
     private Mono<HttpResponse<?>> webhook(
@@ -601,7 +627,17 @@ public class ExecutionController {
         String id,
         String key,
         String path,
-        HttpRequest<String> request) throws IllegalVariableEvaluationException {
+        HttpRequest<?> request) throws IllegalVariableEvaluationException {
+        Optional<Flow> find = flowRepository.findByIdForExecution(tenantService.resolveTenant(), namespace, id);
+        return webhook(find, key, path, request);
+    }
+
+    private Mono<HttpResponse<?>> webhook(
+        String namespace,
+        String id,
+        String key,
+        String path,
+        io.kestra.core.http.HttpRequest request) throws IllegalVariableEvaluationException {
         Optional<Flow> find = flowRepository.findByIdForExecution(tenantService.resolveTenant(), namespace, id);
         return webhook(find, key, path, request);
     }
@@ -610,7 +646,15 @@ public class ExecutionController {
         Optional<Flow> maybeFlow,
         String key,
         String path,
-        HttpRequest<String> request) throws IllegalVariableEvaluationException {
+        HttpRequest<?> request) throws IllegalVariableEvaluationException {
+        return this.webhook(maybeFlow, key, path, MicronautHttpService.from(request));
+    }
+
+    private Mono<HttpResponse<?>> webhook(
+        Optional<Flow> maybeFlow,
+        String key,
+        String path,
+        io.kestra.core.http.HttpRequest request) throws IllegalVariableEvaluationException {
         if (maybeFlow.isEmpty()) {
             throw new HttpStatusException(HttpStatus.NOT_FOUND, "Flow not found");
         }
@@ -653,7 +697,7 @@ public class ExecutionController {
 
         // Webhook context
         var webhookContext = new WebhookContext(
-            MicronautHttpService.from(request),
+            request,
             path,
             flow,
             webhook,

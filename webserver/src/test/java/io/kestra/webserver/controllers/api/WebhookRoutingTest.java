@@ -12,6 +12,7 @@ import io.kestra.core.services.AsyncOperationWaiter;
 import io.micronaut.http.HttpStatus;
 import io.micronaut.http.client.annotation.Client;
 import io.micronaut.http.client.exceptions.HttpClientResponseException;
+import io.micronaut.http.client.multipart.MultipartBody;
 import io.micronaut.reactor.http.client.ReactorHttpClient;
 import io.micronaut.test.annotation.MockBean;
 import jakarta.inject.Inject;
@@ -262,5 +263,27 @@ public class WebhookRoutingTest {
             String.class
         );
         assertThat((Object) arrayResponse.getStatus()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    @LoadFlows(value = { "flows/valids/webhook-routing-test.yaml" })
+    void shouldAcceptMultipartRequestWhenWebhookIsTriggered() {
+        // Given
+        MultipartBody body = MultipartBody.builder()
+            .addPart("photo", "result.jpg", new byte[] { 0, 1, 2, 3, -1 })
+            .addPart("note", "looks good")
+            .build();
+
+        // When
+        var response = client.toBlocking().exchange(
+            POST(
+                "/api/v1/main/executions/webhook/" + TESTS_FLOW_NS + "/webhook-routing-test/testkey",
+                body
+            ).contentType(io.micronaut.http.MediaType.MULTIPART_FORM_DATA_TYPE),
+            String.class
+        );
+
+        // Then
+        assertThat((Object) response.getStatus()).isEqualTo(HttpStatus.OK);
     }
 }
